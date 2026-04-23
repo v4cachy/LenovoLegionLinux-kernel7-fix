@@ -1,0 +1,11 @@
+[Unit]
+Description=Lenovo Legion laptop driver fix
+After=legion_laptop.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c 'echo -n "PNP0C09:00" > /sys/bus/platform/drivers/acpi-ec/unbind 2>/dev/null || true; echo -n "PNP0C09:00" > /sys/bus/platform/drivers/legion/bind'
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
