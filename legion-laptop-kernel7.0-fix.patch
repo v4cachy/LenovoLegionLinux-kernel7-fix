@@ -1,0 +1,105 @@
+diff --git a/kernel_module/Makefile b/kernel_module/Makefile
+index 473f608..4bb35e1 100644
+--- a/kernel_module/Makefile
++++ b/kernel_module/Makefile
+@@ -1,7 +1,16 @@
+ SHELL := /bin/bash
+-KERNELVERSION  ?= $(shell uname --kernel-release)
++KERNELVERSION  := $(shell uname --kernel-release)
+ KSRC := /lib/modules/$(KERNELVERSION)/build
+ 
++#Check if running CachyOS kernel (uses clang toolchain)
++CACHYOS := $(shell echo $(KERNELVERSION) | grep -c cachyos)
++ifeq ($(CACHYOS),1)
++CC := clang
++LD := ld.lld
++AR := ar
++NM := nm
++endif
++
+ #install dir for kernel drivers
+ INSTALLDIR := /lib/modules/$(KERNELVERSION)/kernel/drivers/platform/x86
+ MODDESTDIR := /lib/modules/$(KERNELVERSION)/kernel/drivers/platform/x86
+@@ -10,7 +19,7 @@ DKMSDIR := /usr/src/LenovoLegionLinux-1.0.0
+ obj-m += legion-laptop.o
+ 
+ all:
+-	$(MAKE) -C $(KSRC) M=$(shell pwd) modules
++	$(MAKE) -C $(KSRC) M=$(shell pwd) modules CC="$(CC)" LD="$(LD)" AR="$(AR)" NM="$(NM)"
+ 
+ moduleInContainer:
+ 	docker run -it --rm -v "$(shell pwd)":/kernel_module -w /kernel_module  -v /usr/src/:/usr/src/  -v /lib/modules/:/lib/modules gcc:12.2.0 bash
+@@ -82,4 +91,4 @@ dkms: all
+ 	printf "%s\n" "Loading module"
+ 	modprobe legion_laptop
+ 	dmesg --ctime | grep legion_laptop
+-	bash -c "./issue-warning.sh"
++	bash -c "./issue-warning.sh"
+\ No newline at end of file
+diff --git a/kernel_module/legion-laptop.c b/kernel_module/legion-laptop.c
+index dff8ac2..3972eee 100644
+--- a/kernel_module/legion-laptop.c
++++ b/kernel_module/legion-laptop.c
+@@ -1460,11 +1460,11 @@ static int exec_sbmc(acpi_handle handle, unsigned long arg)
+ 	return exec_simple_method(handle, "VPC0.SBMC", arg);
+ }
+ 
+-//static int eval_qcho(acpi_handle handle, unsigned long *res)
+-//{
+-//	// \_SB.PCI0.LPC0.EC0.QCHO
+-//	return eval_int(handle, "QCHO", res);
+-//}
++static int eval_qcho(acpi_handle handle, unsigned long *res)
++{
++	// \_SB.PCI0.LPC0.EC0.QCHO
++	return eval_int(handle, "QCHO", res);
++}
+ 
+ static int eval_gbmd(acpi_handle handle, unsigned long *res)
+ {
+@@ -3705,20 +3705,18 @@ static int acpi_read_rapidcharge(struct acpi_device *adev, bool *state)
+ 	unsigned long result;
+ 	int err;
+ 
+-	//also works? which one is better?
+-	/*
+-	 * err = eval_qcho(adev->handle, &result);
+-	 * if (err)
+-	 *  return err;
+-	 * state = result;
+-	 * return 0;
+-	 */
+-
+-	err = eval_gbmd(adev->handle, &result);
+-	if (err)
+-		return err;
+-
+-	*state = result & 0x04;
++	/* Try QCHO method instead of GBMD for kernel 7.0 */
++	err = eval_qcho(adev->handle, &result);
++	if (err) {
++		/* Fallback to GBMD */
++		err = eval_gbmd(adev->handle, &result);
++		if (err)
++			return err;
++		*state = result & 0x04;
++	} else {
++		/* QCHO returns direct value */
++		*state = result ? true : false;
++	}
+ 	return 0;
+ }
+ 
+@@ -6416,10 +6414,9 @@ static int legion_pm_resume(struct device *dev)
+ #endif
+ static SIMPLE_DEV_PM_OPS(legion_pm, NULL, legion_pm_resume);
+ 
+-// same as ideapad
++// matches Lenovo Legion laptops (VPC2004 is the EC device)
+ static const struct acpi_device_id legion_device_ids[] = {
+-	// todo: change to "VPC2004", and also ACPI paths
+-	{ "PNP0C09", 0 },
++	{ "VPC2004", 0 },
+ 	{ "", 0 },
+ };
+ MODULE_DEVICE_TABLE(acpi, legion_device_ids);
